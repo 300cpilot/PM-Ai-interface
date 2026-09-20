@@ -9,22 +9,22 @@ cluster, only as far as you allow.
 
 ```mermaid
 flowchart LR
-    subgraph PVE Host
-        UI[PVE Web UI<br/>+ AI button/panel<br/>ExtJS patch]
-        API[PVE REST API<br/>:8006]
+    subgraph PVE["PVE Host"]
+        UI["PVE Web UI<br/>+ AI button/panel<br/>ExtJS patch"]
+        API["PVE REST API<br/>:8006"]
     end
-    subgraph CT 130 proxmox-ai
-        BE[FastAPI backend :9000<br/>auth · permissions · audit]
-        SESS[(sessions.db)]
-        ALOG[(audit.log)]
+    subgraph CT["CT 130 proxmox-ai"]
+        BE["FastAPI backend :9000<br/>auth · permissions · audit"]
+        SESS[("sessions.db")]
+        ALOG[("audit.log")]
     end
-    LLM_LOCAL[Local LLMs<br/>vLLM / ollama / llama.cpp]
-    LLM_ONLINE[Online providers<br/>OpenAI / Anthropic / OpenRouter]
+    LLM_LOCAL["Local LLMs<br/>vLLM / ollama / llama.cpp"]
+    LLM_ONLINE["Online providers<br/>OpenAI / Anthropic / OpenRouter"]
 
     UI -->|PVEAuthCookie| BE
     BE -->|validate ticket| API
     BE -->|API token| API
-    BE -->|SSH key| PVE Host
+    BE -->|SSH key| PVE
     BE --> LLM_LOCAL
     BE -.->|only if enabled| LLM_ONLINE
     BE --> SESS
