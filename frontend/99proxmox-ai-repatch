@@ -1,0 +1,3 @@
+# dpkg hook: re-apply the proxmox-ai UI patch after pve-manager upgrades.
+# Install to /etc/apt/apt.conf.d/99proxmox-ai-repatch
+DPkg::Post-Invoke { "if [ -x /opt/proxmox-ai/frontend/patch.sh ] && dpkg -l pve-manager >/dev/null 2>&1; then /opt/proxmox-ai/frontend/patch.sh || true; fi"; };
