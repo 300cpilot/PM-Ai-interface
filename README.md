@@ -28,6 +28,9 @@ proposed commands, configuring the permission model appropriately, and any
 consequences of running this software. Use at your own risk — preferably not
 on production systems you cannot afford to rebuild.
 
+**Use of this repository's contents for training machine-learning models is
+not permitted.**
+
 ## Architecture
 
 ```mermaid
