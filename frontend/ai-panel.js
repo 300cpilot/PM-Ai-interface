@@ -18,6 +18,25 @@ Ext.define('PVE.ai.Panel', {
 
     backendUrl: PVE_AI_BACKEND, // proxied to backend by patch (see patch.sh notes)
 
+    // in-flight fetch abort controllers — cancelled on close so a stuck
+    // stream can't wedge the window
+    _abortControllers: [],
+
+    onClose: function() {
+        this._abortControllers.forEach(function(c) { try { c.abort(); } catch (e) {} });
+        this._abortControllers = [];
+    },
+
+    close: function() {
+        // belt-and-braces: if hide fails for any reason, destroy instead
+        try {
+            this.onClose();
+            this.callParent(arguments);
+        } catch (e) {
+            this.destroy();
+        }
+    },
+
     initComponent: function() {
         var me = this;
 
@@ -133,10 +152,14 @@ Ext.define('PVE.ai.Panel', {
         me.addMessage('user', text);
         var assistantRec = me.addMessage('assistant', '…');
 
+        var controller = new AbortController();
+        me._abortControllers.push(controller);
+
         fetch(me.backendUrl + '/chat', {
             method: 'POST',
             headers: me.authHeaders(),
             body: JSON.stringify({ message: text, session_id: me.sessionId || null }),
+            signal: controller.signal,
         }).then(function(resp) {
             if (!resp.ok) {
                 assistantRec.set('text', 'Error: HTTP ' + resp.status);
@@ -158,6 +181,7 @@ Ext.define('PVE.ai.Panel', {
             }
             pump();
         }).catch(function(err) {
+            if (err && err.name === 'AbortError') { return; } // closed by user
             assistantRec.set('text', 'Connection error: ' + err);
             assistantRec.commit();
         });
@@ -210,12 +234,27 @@ Ext.define('PVE.ai.Panel', {
         fetch(me.backendUrl + '/exec/' + id + '/' + action, {
             method: 'POST',
             headers: me.authHeaders(),
-        }).then(function(resp) { return resp.json(); }).then(function(result) {
+        }).then(function(resp) {
+            return resp.json().then(function(body) { return { ok: resp.ok, body: body }; });
+        }).then(function(r) {
+            var result = r.body || {};
+            if (!r.ok) {
+                me.addMessage('assistant',
+                    (action === 'approve' ? 'Approve' : 'Deny') + ' failed: ' +
+                    (result.detail || ('HTTP ' + r.status)),
+                    { kind: 'exec', execId: id, status: 'failed' });
+                return;
+            }
+            var exitTxt = (result.exit_code === null || result.exit_code === undefined)
+                ? '' : ' exit ' + result.exit_code;
             me.addMessage('assistant',
                 action === 'approve'
-                    ? ('Approved. exit ' + result.exit_code + '\n' + (result.output || ''))
+                    ? ('Approved.' + exitTxt + (result.output ? '\n' + result.output : ''))
                     : 'Denied.',
-                { kind: 'exec', execId: id, status: result.status });
+                { kind: 'exec', execId: id, status: result.status || 'done' });
+        }).catch(function(err) {
+            me.addMessage('assistant', 'Action error: ' + err,
+                { kind: 'exec', execId: id, status: 'failed' });
         });
     },
 });
