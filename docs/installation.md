@@ -143,7 +143,22 @@ Notes:
   `re.search` against the stripped command; anchor with `^` to match from the
   start. Anything not matching falls back to requiring confirmation.
 - Kill switch: `pct exec 130 -- touch /etc/proxmox-ai/DISABLED` instantly 503s
-  all chat/exec. Remove the file to re-enable.
+  all chat/exec — including **pending approvals** (re-checked at execution
+  time). Remove the file to re-enable.
+- **TLS verification** for the PVE API defaults to `verify_tls: true`. With the
+  default self-signed PVE cert, either install the PVE CA on the CT or set
+  `verify_tls: false` in Settings (understand the MITM risk first).
+- The CT's SSH key is added to the host's `authorized_keys` with
+  `from="<CT_IP>",restrict` — it only works from the CT and cannot forward
+  ports/agents. The host's SSH host key is pinned in the CT's
+  `/etc/proxmox-ai/keys/known_hosts` at install time; if you rebuild or rekey
+  the host, re-run `ssh-keyscan` or SSH exec will refuse to connect.
+- `VLLM_KEY` has no default — export it before running `install.sh` if your
+  vLLM server requires a key.
+- **Uninstall**: `./uninstall.sh` on the host removes the UI patch, dpkg hook,
+  TLS proxy, and authorized_keys entry; `DESTROY_CT=1 ./uninstall.sh` also
+  destroys the backend CT. Revoke the API token manually:
+  `pveum user token remove root@pam proxmox-ai`.
 
 ## Step 6 — Verify
 

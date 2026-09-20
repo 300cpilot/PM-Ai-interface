@@ -26,7 +26,8 @@ CT_HOSTNAME="proxmox-ai"
 # --- shared vLLM server (same for all hosts) ---
 VLLM_URL="${VLLM_URL:-http://192.168.1.XXX:8000/v1}"
 VLLM_MODEL="${VLLM_MODEL:-qwen3-30b-a3b}"
-VLLM_KEY="${VLLM_KEY:-CHANGE-ME-vllm-api-key}"
+# No default key — pass VLLM_KEY explicitly if your server requires one (7.8)
+VLLM_KEY="${VLLM_KEY:-}"
 
 # --- helpers ---------------------------------------------------------------
 
@@ -143,7 +144,17 @@ pct exec "$CTID" -- bash -c "
     chown proxmox-ai:proxmox-ai /etc/proxmox-ai/keys/id_ed25519*
 "
 PUBKEY=$(pct exec "$CTID" -- cat /etc/proxmox-ai/keys/id_ed25519.pub)
-grep -qF "$PUBKEY" /root/.ssh/authorized_keys 2>/dev/null || echo "$PUBKEY" >> /root/.ssh/authorized_keys
+# restrict: only from the CT's IP, no forwarding/pty/agent (7.7)
+CT_IP_ONLY="${CT_IP%/*}"
+AUTH_LINE="from=\"$CT_IP_ONLY\",restrict $PUBKEY"
+grep -qF "$PUBKEY" /root/.ssh/authorized_keys 2>/dev/null || echo "$AUTH_LINE" >> /root/.ssh/authorized_keys
+
+# pin the host's SSH host key in the CT (7.5)
+pct exec "$CTID" -- bash -c "
+    ssh-keyscan -T 10 -t ed25519,rsa,ecdsa $PVE_NODE_IP > /etc/proxmox-ai/keys/known_hosts 2>/dev/null
+    chown proxmox-ai:proxmox-ai /etc/proxmox-ai/keys/known_hosts
+    chmod 644 /etc/proxmox-ai/keys/known_hosts
+"
 
 # --- 4. verify the shared vLLM server is reachable from the CT ---------------
 
@@ -183,7 +194,7 @@ pct exec "$CTID" -- bash -c "cat > /etc/proxmox-ai/config.json" <<EOF
   "pve": {
     "api_url": "https://$PVE_NODE_IP:8006/api2/json",
     "api_token": "",
-    "verify_tls": false
+    "verify_tls": true
   },
   "security": {
     "server_access": false,

@@ -57,7 +57,7 @@ class NodeConfig(BaseModel):
 class PVEConfig(BaseModel):
     api_url: str = "https://127.0.0.1:8006/api2/json"
     api_token: str = ""  # e.g. root@pam!proxmox-ai=xxxxxxxx
-    verify_tls: bool = False
+    verify_tls: bool = True
 
 
 class SecurityConfig(BaseModel):
@@ -74,7 +74,7 @@ class SecurityConfig(BaseModel):
 
 
 class Config(BaseModel):
-    listen_host: str = "0.0.0.0"
+    listen_host: str = "0.0.0.0"  # CT must be reachable by the host's socat TLS proxy
     listen_port: int = 9000
     active_provider: str = ""
     providers: list[ProviderConfig] = Field(default_factory=list)

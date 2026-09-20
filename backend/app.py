@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,20 +30,33 @@ import context
 import guest_exec
 import permissions
 import providers
+import pve_api
 import sessions
 import ssh_exec
+import tasks
 from auth import User, require_root_dep, require_user
 from config import CATEGORIES, Config, get_provider, kill_switch_active, load, masked, save
 
 app = FastAPI(title="proxmox-ai", version="0.1.0")
+
+# The UI is served from the PVE host (:8006) and calls the backend via the
+# TLS proxy (:9443) — different port = cross-origin. Allow same-host origins
+# on the PVE UI ports; everything else is rejected.
+def _cors_origins() -> list[str]:
+    cfg = load()
+    host = urlparse(cfg.pve.api_url).hostname or "127.0.0.1"
+    return [f"https://{host}:8006", f"https://{host}"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # UI is same-origin via PVE; tighten if exposed
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["PVEAuthCookie", "CSRFPreventionToken", "Authorization", "Content-Type",
+                   "PVE-Auth-Cookie"],
 )
 
 EXEC_BLOCK_RE = re.compile(r"```exec(?:\s+node=(\S+))?\s*\n(.*?)```", re.DOTALL)
+UPID_RE = re.compile(r"UPID:[^\s:]+:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[^\s:]+")
 
 
 # ---------- models ----------
@@ -81,9 +95,9 @@ async def chat(body: ChatIn, user: User = Depends(require_user)):
     provider = providers.build(pcfg)
 
     sid = body.session_id or sessions.create(user.name, title=body.message[:60])
-    prior = sessions.get(sid, user.name)
+    prior = sessions.get(sid, user.name, max_age_minutes=cfg.security.session_max_minutes)
     if prior is None:
-        raise HTTPException(404, "session not found")
+        raise HTTPException(404, "session not found or expired")
 
     messages = [{"role": "system", "content": await context.system_prompt()}]
     messages += prior["messages"]
@@ -116,6 +130,8 @@ async def chat(body: ChatIn, user: User = Depends(require_user)):
                 payload.update({"status": req.status, "output": req.output,
                                 "exit_code": req.exit_code})
                 yield {"event": "exec_result", "data": json.dumps(payload)}
+                async for ev in _stream_task_progress(req.node, req.output):
+                    yield ev
             else:
                 yield {"event": "exec_request", "data": json.dumps(payload)}
         yield {"event": "done", "data": "{}"}
@@ -189,7 +205,7 @@ async def exec_request(body: ExecIn, user: User = Depends(require_user)):
 @app.get("/exec/{req_id}")
 async def exec_status(req_id: str, user: User = Depends(require_user)):
     req = ssh_exec.get(req_id)
-    if not req:
+    if not req or req.actor != user.name:
         raise HTTPException(404, "unknown request id")
     return req.__dict__
 
@@ -197,7 +213,7 @@ async def exec_status(req_id: str, user: User = Depends(require_user)):
 @app.post("/exec/{req_id}/approve")
 async def exec_approve(req_id: str, user: User = Depends(require_user)):
     req = ssh_exec.get(req_id)
-    if not req:
+    if not req or req.actor != user.name:
         raise HTTPException(404, "unknown request id")
     try:
         ssh_exec.approve(req_id, user.name)
@@ -210,13 +226,28 @@ async def exec_approve(req_id: str, user: User = Depends(require_user)):
 @app.post("/exec/{req_id}/deny")
 async def exec_deny(req_id: str, user: User = Depends(require_user)):
     req = ssh_exec.get(req_id)
-    if not req:
+    if not req or req.actor != user.name:
         raise HTTPException(404, "unknown request id")
     try:
         ssh_exec.deny(req_id, user.name)
     except ValueError as e:
         raise HTTPException(409, str(e))
     return {"status": req.status}
+
+
+@app.get("/exec/{req_id}/task")
+async def exec_task_progress(req_id: str, user: User = Depends(require_user)):
+    """SSE stream of UPID task progress for a completed exec request (3.4/5.4)."""
+    req = ssh_exec.get(req_id)
+    if not req or req.actor != user.name:
+        raise HTTPException(404, "unknown request id")
+
+    async def stream():
+        async for ev in _stream_task_progress(req.node, req.output):
+            yield ev
+        yield {"event": "done", "data": "{}"}
+
+    return EventSourceResponse(stream())
 
 
 # ---------- guest exec ----------

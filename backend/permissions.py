@@ -69,20 +69,29 @@ _allowlist_re = [re.compile(p) for p in ALLOWLIST_PATTERNS]
 _denylist_re = [re.compile(p) for p in DENYLIST_PATTERNS]
 _category_re = [(re.compile(p), c) for p, c in CATEGORY_MAP]
 
+# Shell metacharacters that allow chaining/substitution/redirection.
+# A command containing any of these is never allowlist-auto-run.
+SHELL_METACHAR_RE = re.compile(r"[;|&`<>\n]|\$\(|\$\{|\r")
+
 
 class RateLimiter:
+    """Per-actor sliding-window rate limiter."""
     def __init__(self) -> None:
-        self._hits: deque[float] = deque()
+        self._hits: dict[str, deque[float]] = {}
         self._lock = threading.Lock()
 
-    def allow(self, max_per_minute: int) -> bool:
+    def allow(self, max_per_minute: int, actor: str = "global") -> bool:
         now = time.monotonic()
         with self._lock:
-            while self._hits and now - self._hits[0] > 60:
-                self._hits.popleft()
-            if len(self._hits) >= max_per_minute:
+            hits = self._hits.setdefault(actor, deque())
+            while hits and now - hits[0] > 60:
+                hits.popleft()
+            if len(hits) >= max_per_minute:
                 return False
-            self._hits.append(now)
+            hits.append(now)
+            # evict idle actors so the map doesn't grow forever
+            for a in [a for a, h in self._hits.items() if not h]:
+                del self._hits[a]
             return True
 
 
@@ -94,7 +103,11 @@ def is_denied(command: str) -> bool:
 
 
 def is_allowlisted(command: str) -> bool:
-    return any(r.search(command.strip()) for r in _allowlist_re)
+    cmd = command.strip()
+    # never auto-run anything with shell chaining/substitution/redirection
+    if SHELL_METACHAR_RE.search(cmd):
+        return False
+    return any(r.search(cmd) for r in _allowlist_re)
 
 
 def categorize(command: str) -> str:
@@ -127,7 +140,8 @@ def check_provider_allowed(cfg: Config, ptype: str, base_url: str) -> str | None
     return None
 
 
-def check_execution(cfg: Config, command: str, category: str | None = None) -> tuple[str, str]:
+def check_execution(cfg: Config, command: str, category: str | None = None,
+                    actor: str = "global") -> tuple[str, str]:
     """Decide what happens to a proposed command.
 
     Returns (decision, reason) where decision is one of:
@@ -142,7 +156,7 @@ def check_execution(cfg: Config, command: str, category: str | None = None) -> t
         return "blocked", "kill switch active (/etc/proxmox-ai/DISABLED)"
     if not sec.server_access:
         return "blocked", "server_access is off"
-    if not rate_limiter.allow(sec.max_commands_per_minute):
+    if not rate_limiter.allow(sec.max_commands_per_minute, actor):
         return "blocked", f"rate limit exceeded ({sec.max_commands_per_minute}/min)"
     if is_denied(command):
         return "confirm", "denylist: destructive command always requires approval"

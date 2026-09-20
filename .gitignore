@@ -1,6 +1,0 @@
-__pycache__/
-*.pyc
-.env
-*.key
-id_ed25519*
-config.json

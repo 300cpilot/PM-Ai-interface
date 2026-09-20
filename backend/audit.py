@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -21,8 +22,11 @@ def log(event: str, actor: str = "system", **fields: Any) -> None:
     line = json.dumps(record, default=str)
     with _lock:
         AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        new = not AUDIT_LOG.exists()
         with AUDIT_LOG.open("a") as f:
             f.write(line + "\n")
+        if new:
+            os.chmod(AUDIT_LOG, 0o600)
 
 
 def read_tail(limit: int = 200) -> list[dict[str, Any]]:

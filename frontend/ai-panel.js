@@ -193,6 +193,12 @@ Ext.define('PVE.ai.Panel', {
             me.addMessage('assistant',
                 'Ran: ' + payload.command + '\nexit ' + payload.exit_code + '\n' + (payload.output || ''),
                 { kind: 'exec', execId: payload.id, status: payload.status });
+        } else if (event === 'task_progress') {
+            var txt = payload.state === 'stopped'
+                ? 'Task ' + payload.upid + ' finished: ' + payload.exitstatus
+                : 'Task ' + payload.upid + ': ' + payload.state +
+                  (payload.progress != null ? ' (' + Math.round(payload.progress * 100) + '%)' : '');
+            me.addMessage('assistant', txt, { kind: 'task', execId: '', status: payload.state });
         } else if (event === 'error') {
             assistantRec.set('text', 'Error: ' + payload.error);
             assistantRec.commit();
@@ -225,6 +231,8 @@ Ext.define('PVE.ai.Panel', {
         + '.pve-ai-user .pve-ai-bubble{background:#2f6f9f;}'
         + '.pve-ai-assistant .pve-ai-bubble{background:#2b3038;}'
         + '.pve-ai-exec{margin-top:6px;font-family:monospace;}'
+        + '.pve-ai-task .pve-ai-bubble{background:#26343f;border-left:3px solid #2f6f9f;'
+        + 'font-family:monospace;font-size:12px;}'
         + '.pve-ai-approve,.pve-ai-deny{margin-right:6px;padding:3px 10px;cursor:pointer;}'
         + '.pve-ai-approve{background:#2e7d32;color:#fff;border:0;border-radius:4px;}'
         + '.pve-ai-deny{background:#c62828;color:#fff;border:0;border-radius:4px;}';

@@ -20,7 +20,8 @@ PVE_NODE_NAME="${PVE_NODE_NAME:-node01}"
 PVE_NODE_IP="${PVE_NODE_IP:-192.168.1.XXX}"
 VLLM_URL="${VLLM_URL:-http://192.168.1.XXX:8000/v1}"
 VLLM_MODEL="${VLLM_MODEL:-qwen3-30b-a3b}"
-VLLM_KEY="${VLLM_KEY:-CHANGE-ME-vllm-api-key}"
+# No default key — pass VLLM_KEY explicitly if your server requires one (7.8)
+VLLM_KEY="${VLLM_KEY:-}"
 
 echo "=== proxmox-ai installer ==="
 echo "CT ID: $CTID  IP: $CT_IP  GW: $CT_GW"
@@ -83,7 +84,18 @@ pct exec "$CTID" -- bash -c "
     chown proxmox-ai:proxmox-ai /etc/proxmox-ai/keys/id_ed25519*
 "
 PUBKEY=$(pct exec "$CTID" -- cat /etc/proxmox-ai/keys/id_ed25519.pub)
-grep -qF "$PUBKEY" /root/.ssh/authorized_keys 2>/dev/null || echo "$PUBKEY" >> /root/.ssh/authorized_keys
+# restrict: only from the CT's IP, no forwarding/pty/agent (7.7)
+CT_IP_ONLY="${CT_IP%/*}"
+AUTH_LINE="from=\"$CT_IP_ONLY\",restrict $PUBKEY"
+grep -qF "$PUBKEY" /root/.ssh/authorized_keys 2>/dev/null || echo "$AUTH_LINE" >> /root/.ssh/authorized_keys
+
+# --- 3b. pin the host's SSH host key in the CT (7.5) ---
+echo "[3b/7] recording host SSH key in CT known_hosts"
+pct exec "$CTID" -- bash -c "
+    ssh-keyscan -T 10 -t ed25519,rsa,ecdsa $PVE_NODE_IP > /etc/proxmox-ai/keys/known_hosts 2>/dev/null
+    chown proxmox-ai:proxmox-ai /etc/proxmox-ai/keys/known_hosts
+    chmod 644 /etc/proxmox-ai/keys/known_hosts
+"
 
 # --- 4. seed config (locked down) ---
 echo "[4/7] writing default config (everything OFF except local chat)"
@@ -111,7 +123,7 @@ pct exec "$CTID" -- bash -c "cat > /etc/proxmox-ai/config.json" <<EOF
   "pve": {
     "api_url": "https://$PVE_NODE_IP:8006/api2/json",
     "api_token": "",
-    "verify_tls": false
+    "verify_tls": true
   },
   "security": {
     "server_access": false,
@@ -132,12 +144,22 @@ EOF
 pct exec "$CTID" -- bash -c "
     chmod 600 /etc/proxmox-ai/config.json
     chown proxmox-ai:proxmox-ai /etc/proxmox-ai/config.json
+    cat > /etc/logrotate.d/proxmox-ai <<'EOF'
+/var/log/proxmox-ai/audit.log {
+    weekly
+    rotate 12
+    compress
+    missingok
+    notifempty
+    create 600 proxmox-ai proxmox-ai
+}
+EOF
     systemctl daemon-reload
     systemctl enable --now proxmox-ai
 "
 
 # --- 4b. TLS termination on the host (fixes HTTPS-page -> HTTP-backend mixed content) ---
-# socat serves the backend over HTTPS using the PVE host's own cert on port 9443.
+# socat runs on the host and must reach the CT's IP — the backend binding to CT localhost would break this. Keep CT IP target; the CT-side firewall note goes to docs instead.
 echo "[4b/7] setting up TLS proxy on port $TLS_PORT (PVE cert -> backend)"
 cat > /etc/systemd/system/proxmox-ai-tls.service <<EOF
 [Unit]

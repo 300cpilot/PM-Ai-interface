@@ -4,6 +4,7 @@ Gated by the guest_exec toggle + guest_exec category.
 from __future__ import annotations
 
 import asyncio
+import shlex
 
 import audit
 import pve_api
@@ -15,13 +16,14 @@ from config import load
 async def qemu_exec(node: str, vmid: int, command: str, actor: str) -> dict:
     cfg = load()
     decision, reason = permissions.check_execution(cfg, f"qm agent {vmid} exec {command}",
-                                                   category="guest_exec")
+                                                   category="guest_exec", actor=actor)
     audit.log("guest_exec_request", actor=actor, kind="qemu", node=node, vmid=vmid,
               command=command, decision=decision, reason=reason)
     if decision == "blocked":
         return {"status": "blocked", "reason": reason}
     if decision == "confirm":
-        req = ssh_exec.request(f"qm agent {vmid} exec -- {command}", actor, node)
+        # quote so the host shell sees the guest command as one literal arg
+        req = ssh_exec.request(f"qm agent {vmid} exec -- {shlex.quote(command)}", actor, node)
         return {"status": "confirm", "request_id": req.id, "reason": reason}
 
     result = await pve_api.qemu_agent_exec(node, vmid, ["/bin/sh", "-c", command])
@@ -43,8 +45,9 @@ async def qemu_exec(node: str, vmid: int, command: str, actor: str) -> dict:
 
 async def lxc_exec(node: str, vmid: int, command: str, actor: str) -> dict:
     cfg = load()
-    full = f"pct exec {vmid} -- {command}"
-    decision, reason = permissions.check_execution(cfg, full, category="guest_exec")
+    full = f"pct exec {vmid} -- {shlex.quote(command)}"
+    decision, reason = permissions.check_execution(cfg, full, category="guest_exec",
+                                                   actor=actor)
     audit.log("guest_exec_request", actor=actor, kind="lxc", node=node, vmid=vmid,
               command=command, decision=decision, reason=reason)
     if decision == "blocked":

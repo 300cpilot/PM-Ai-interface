@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -14,7 +15,10 @@ _lock = threading.Lock()
 
 def _db() -> sqlite3.Connection:
     SESSIONS_DB.parent.mkdir(parents=True, exist_ok=True)
+    new = not SESSIONS_DB.exists()
     conn = sqlite3.connect(SESSIONS_DB)
+    if new:
+        os.chmod(SESSIONS_DB, 0o600)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS sessions (
                id TEXT PRIMARY KEY,
@@ -51,7 +55,7 @@ def append(sid: str, role: str, content: str) -> None:
                      (json.dumps(msgs), now, sid))
 
 
-def get(sid: str, owner: str) -> dict | None:
+def get(sid: str, owner: str, max_age_minutes: int | None = None) -> dict | None:
     with _lock, _db() as conn:
         row = conn.execute(
             "SELECT id, owner, title, created, updated, messages FROM sessions WHERE id=?",
@@ -59,6 +63,14 @@ def get(sid: str, owner: str) -> dict | None:
         ).fetchone()
     if not row or row[1] != owner:
         return None
+    if max_age_minutes is not None:
+        try:
+            updated = datetime.fromisoformat(row[4])
+            age = (datetime.now(timezone.utc) - updated).total_seconds() / 60
+            if age > max_age_minutes:
+                return None  # expired
+        except ValueError:
+            pass
     return {"id": row[0], "owner": row[1], "title": row[2],
             "created": row[3], "updated": row[4], "messages": json.loads(row[5])}
 

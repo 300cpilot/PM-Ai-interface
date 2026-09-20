@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -10,7 +12,13 @@ import paramiko
 
 import audit
 import permissions
-from config import NodeConfig, load
+from config import NodeConfig, kill_switch_active, load
+
+# known_hosts for host-key verification (7.5). Override for dev.
+KNOWN_HOSTS = os.environ.get("PROXMOX_AI_KNOWN_HOSTS", "/etc/proxmox-ai/keys/known_hosts")
+
+# how long completed/pending requests stay in memory (7.17)
+REQUEST_TTL = 3600.0
 
 
 @dataclass
@@ -26,10 +34,18 @@ class ExecRequest:
     output: str = ""
     exit_code: int | None = None
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_ts: float = field(default_factory=time.monotonic)
 
 
 # in-flight requests (pending approvals + recent results)
 _requests: dict[str, ExecRequest] = {}
+
+
+def _evict_old() -> None:
+    now = time.monotonic()
+    for rid in [r for r, q in _requests.items()
+                if now - q.created_ts > REQUEST_TTL and q.status != "running"]:
+        del _requests[rid]
 
 
 def _node_cfg(name: str) -> NodeConfig:
@@ -45,7 +61,7 @@ def _node_cfg(name: str) -> NodeConfig:
 def request(command: str, actor: str, node: str = "") -> ExecRequest:
     cfg = load()
     node = node or (cfg.nodes[0].name if cfg.nodes else "node01")
-    decision, reason = permissions.check_execution(cfg, command)
+    decision, reason = permissions.check_execution(cfg, command, actor=actor)
     req = ExecRequest(
         id=uuid.uuid4().hex[:12],
         command=command,
@@ -55,6 +71,7 @@ def request(command: str, actor: str, node: str = "") -> ExecRequest:
         reason=reason,
         actor=actor,
     )
+    _evict_old()
     _requests[req.id] = req
     audit.log("exec_request", actor=actor, id=req.id, node=node,
               command=command, category=req.category, decision=decision, reason=reason)
@@ -87,7 +104,14 @@ def deny(req_id: str, actor: str) -> ExecRequest:
 
 def _run_ssh(node: NodeConfig, command: str, timeout: int = 120) -> tuple[str, int]:
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    if os.path.exists(KNOWN_HOSTS):
+        client.load_host_keys(KNOWN_HOSTS)
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    else:
+        # no known_hosts yet: accept-and-record would be a MITM hole, so refuse
+        raise RuntimeError(
+            f"known_hosts not found at {KNOWN_HOSTS} — run ssh-keyscan at install time"
+        )
     try:
         client.connect(
             node.host, port=node.ssh_port, username=node.ssh_user,
@@ -106,6 +130,25 @@ async def execute(req: ExecRequest) -> ExecRequest:
     """Run an approved (or auto) request. Updates req in place."""
     if req.status not in ("approved",) and req.decision != "auto":
         raise ValueError(f"request {req.id} not approved (status={req.status})")
+
+    # Re-validate at execution time (7.2/7.3): the kill switch, toggles,
+    # category modes, and rate limits may have changed since the request
+    # was created. A pending approval must not survive a lockdown.
+    if kill_switch_active():
+        req.status = "blocked"
+        req.output = "kill switch active (/etc/proxmox-ai/DISABLED)"
+        audit.log("exec_result", actor=req.actor, id=req.id, command=req.command,
+                  status="blocked", reason="kill switch active at execution time")
+        return req
+    cfg = load()
+    decision, reason = permissions.check_execution(cfg, req.command, actor=req.actor)
+    if decision == "blocked":
+        req.status = "blocked"
+        req.output = f"blocked at execution time: {reason}"
+        audit.log("exec_result", actor=req.actor, id=req.id, command=req.command,
+                  status="blocked", reason=reason)
+        return req
+
     req.status = "running"
     try:
         node = _node_cfg(req.node)

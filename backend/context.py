@@ -1,8 +1,18 @@
 """Live cluster context injection. Builds a read-only snapshot for the system prompt."""
 from __future__ import annotations
 
+import re
+
 import pve_api
 from config import load
+
+# strip characters that could break out of the snapshot into prompt structure
+_UNSAFE_RE = re.compile(r"[`\r\n]+")
+
+
+def _clean(value: object) -> str:
+    """Sanitize a cluster-supplied string before it enters the prompt (7.12)."""
+    return _UNSAFE_RE.sub(" ", str(value))[:120]
 
 SYSTEM_PROMPT = """You are the Proxmox AI Assistant embedded in the Proxmox VE web UI.
 You help the administrator manage their Proxmox server/cluster.
@@ -38,24 +48,24 @@ async def snapshot() -> str:
     lines: list[str] = []
     try:
         for node in await pve_api.nodes():
-            name = node["node"]
-            status = "up" if node.get("status") == "online" else node.get("status", "?")
+            name = _clean(node["node"])
+            status = "up" if node.get("status") == "online" else _clean(node.get("status", "?"))
             cpu = node.get("cpu", 0) * 100
             mem_used = node.get("mem", 0) / 1e9
             mem_max = node.get("maxmem", 1) / 1e9
             lines.append(f"Node {name}: {status}, cpu {cpu:.0f}%, mem {mem_used:.1f}/{mem_max:.1f} GB")
             try:
                 for vm in await pve_api.node_vms(name):
-                    lines.append(f"  VM {vm['vmid']} {vm.get('name','?')}: {vm.get('status','?')}")
+                    lines.append(f"  VM {vm['vmid']} {_clean(vm.get('name','?'))}: {_clean(vm.get('status','?'))}")
                 for ct in await pve_api.node_cts(name):
-                    lines.append(f"  CT {ct['vmid']} {ct.get('name','?')}: {ct.get('status','?')}")
+                    lines.append(f"  CT {ct['vmid']} {_clean(ct.get('name','?'))}: {_clean(ct.get('status','?'))}")
                 for st in await pve_api.node_storage(name):
                     used = st.get("used", 0) / 1e9
                     total = st.get("total", 1) / 1e9
-                    lines.append(f"  Storage {st['storage']}: {used:.0f}/{total:.0f} GB ({st.get('type','?')})")
+                    lines.append(f"  Storage {_clean(st['storage'])}: {used:.0f}/{total:.0f} GB ({_clean(st.get('type','?'))})")
                 templates = await pve_api.node_ct_templates(name)
                 if templates:
-                    lines.append("  CT templates: " + ", ".join(templates))
+                    lines.append("  CT templates: " + ", ".join(_clean(t) for t in templates))
             except Exception as e:
                 lines.append(f"  (detail fetch failed: {e})")
     except Exception as e:
@@ -64,4 +74,4 @@ async def snapshot() -> str:
 
 
 async def system_prompt() -> str:
-    return SYSTEM_PROMPT.format(snapshot=await snapshot())
+    return SYSTEM_PROMPT.format(snapshot=_clean(await snapshot()))
