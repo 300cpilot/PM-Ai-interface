@@ -31,35 +31,7 @@ Rules:
   - password change: echo 'user:NEWPASS' | chpasswd  (via bash -c)
   - apt: apt-get -y / DEBIAN_FRONTEND=noninteractive
   - file edits: sed -i / tee / heredoc, never an editor
-- Commands in ```exec blocks run on the PVE HOST (node), NOT inside a guest.
-  To change something inside a VM/CT (user passwords, packages, files), wrap
-  it: pct exec <vmid> -- bash -c "..." for containers, or use the guest agent
-  for VMs. Example — set a user password inside CT 131:
-  pct exec 131 -- bash -c "echo 'user:NEWPASS' | chpasswd"
 - Keep answers concise.
-
-Terminology (use these precisely):
-- **Node / host**: a physical Proxmox VE server (runs the hypervisor).
-- **CT**: LXC container — lightweight, shares the host kernel. Managed with
-  `pct`. CT IDs and VM IDs share one numbering space (vmid).
-- **VM**: QEMU/KVM virtual machine — full virtualized hardware, own kernel.
-  Managed with `qm`.
-- **Guest**: generic term for a CT or VM.
-- **vmid**: numeric guest ID (e.g. 131). Unique across CTs and VMs.
-- **Storage**: named storage pool (e.g. local, local-lvm) — `pvesm status`.
-  Volumes are referenced as <storage>:<volume> (e.g. local-lvm:vm-131-disk-0).
-- **Template**: CT templates are .tar.zst images in a vztmpl storage
-  (pct create). VM templates are linked/full clones of an existing VM
-  (qm clone), not files.
-- **Cluster**: multiple nodes sharing config via /etc/pve (pmxcfs);
-  `pvecm status` shows quorum.
-- **UPID**: unique task ID returned by long-running operations
-  (e.g. UPID:node01:00001234:...) — used to poll task status.
-- **Bridge**: virtual network switch (e.g. vmbr0) guests attach to via --net0.
-- **ZFS pool / dataset**: if present, managed with zpool/zfs; VM/CT disks may
-  live on ZFS (storage type zfspool).
-- **pvesh**: REST API CLI — `pvesh get /nodes/<node>/status` etc. Prefer it
-  for anything the dedicated tools don't cover.
 
 Command syntax reference (do NOT invent flags — use exactly these):
 - Create CT: pct create <vmid> <ostemplate> --hostname <name> --memory <MB> --cores <n> --rootfs <storage>:<GB> --net0 name=eth0,bridge=<bridge>[,ip=dhcp] [--unprivileged 1] [--start 1]
@@ -108,9 +80,4 @@ async def snapshot() -> str:
 
 
 async def system_prompt() -> str:
-    # A custom template from Settings → System Prompt wins; empty means the
-    # built-in default. Use str.replace (not str.format) so user-supplied
-    # templates containing other braces (e.g. JSON examples) cannot break
-    # substitution.
-    template = load().system_prompt or SYSTEM_PROMPT
-    return template.replace("{snapshot}", _clean(await snapshot()))
+    return SYSTEM_PROMPT.format(snapshot=_clean(await snapshot()))

@@ -110,47 +110,12 @@ Ext.define('PVE.ai.Settings', {
                 { text: 'Decision', dataIndex: 'decision', width: 90 },
                 { text: 'Status', dataIndex: 'status', width: 80 },
             ],
-            tbar: [
-                { text: 'Refresh', handler: function() { me.loadAudit(); } },
-                '->',
-                { text: 'Clear', cls: 'x-btn-danger', handler: function() { me.clearAudit(); } },
-            ],
-        });
-
-        // System prompt editor: the hidden instructions prepended to every chat.
-        // Empty (or unchanged from the built-in default) = inherit the default.
-        me.promptPanel = Ext.create('Ext.form.Panel', {
-            title: 'System Prompt',
-            bodyPadding: 10,
-            layout: 'fit',
-            items: [{
-                xtype: 'textarea',
-                name: 'system_prompt',
-                hideLabel: true,
-                selectOnFocus: true,
-            }],
-            tbar: [
-                {
-                    xtype: 'tbtext',
-                    text: 'Hidden instructions sent to the model before every chat. ' +
-                          '<code>{snapshot}</code> is replaced with a live cluster snapshot. ' +
-                          'Save empty or unchanged to use the built-in default.',
-                },
-                '->',
-                {
-                    text: 'Reset to Default',
-                    handler: function() {
-                        me.promptPanel.getForm().setValues({
-                            system_prompt: (me.cfg && me.cfg.default_system_prompt) || '',
-                        });
-                    },
-                },
-            ],
+            tbar: [{ text: 'Refresh', handler: function() { me.loadAudit(); } }],
         });
 
         me.items = [{
             xtype: 'tabpanel',
-            items: [me.securityPanel, me.categoryGrid, me.providerGrid, me.promptPanel, me.auditGrid],
+            items: [me.securityPanel, me.categoryGrid, me.providerGrid, me.auditGrid],
         }];
 
         me.buttons = [
@@ -191,10 +156,6 @@ Ext.define('PVE.ai.Settings', {
                     })
                 );
                 me.providerGrid.getStore().loadData(cfg.providers || []);
-                // show the custom prompt, or the built-in default for reference/editing
-                me.promptPanel.getForm().setValues({
-                    system_prompt: cfg.system_prompt || cfg.default_system_prompt || '',
-                });
             })
             .catch(function(e) { Ext.Msg.alert('Error', 'Failed to load config: ' + e); });
     },
@@ -204,22 +165,6 @@ Ext.define('PVE.ai.Settings', {
         fetch(me.backendUrl + '/audit?limit=200', { headers: me.authHeaders() })
             .then(function(r) { return r.json(); })
             .then(function(data) { me.auditGrid.getStore().loadData(data.entries.reverse()); });
-    },
-
-    clearAudit: function() {
-        var me = this;
-        Ext.Msg.confirm('Clear Audit Log',
-            'Delete the ENTIRE audit log? The clear action itself will be recorded.',
-            function(btn) {
-                if (btn !== 'yes') { return; }
-                fetch(me.backendUrl + '/audit', {
-                    method: 'DELETE',
-                    headers: me.authHeaders(),
-                }).then(function(r) {
-                    if (r.ok) { me.loadAudit(); }
-                    else { r.json().then(function(e) { Ext.Msg.alert('Clear failed', e.detail || r.status); }); }
-                });
-            });
     },
 
     editProvider: function(existing) {
@@ -296,11 +241,6 @@ Ext.define('PVE.ai.Settings', {
         cfg.active_provider = me.activeProvider || cfg.active_provider;
         cfg.providers = [];
         me.providerGrid.getStore().each(function(rec) { cfg.providers.push(rec.data); });
-
-        // empty or unchanged-from-default = inherit the built-in default (store '')
-        var prompt = (me.promptPanel.getForm().getValues().system_prompt || '').trim();
-        var defPrompt = (me.cfg.default_system_prompt || '').trim();
-        cfg.system_prompt = (prompt && prompt !== defPrompt) ? prompt : '';
 
         fetch(me.backendUrl + '/config', {
             method: 'PUT',
