@@ -38,6 +38,8 @@ ALLOWLIST_PATTERNS = [
 DENYLIST_PATTERNS = [
     r"\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)?/(\s|$|\*)",
     r"\brm\s+-[a-zA-Z]*[rf][a-zA-Z]*\s+.*\*",
+    r"\brm\s+-[a-zA-Z]*[rf][a-zA-Z]*\s+/",   # any rm -rf with absolute path
+    r"\brm\s+-[a-zA-Z]*[rf][a-zA-Z]*\s+~",   # rm -rf ~ (home)
     r"\bmkfs(\.\w+)?\b",
     r"\bdd\b.*\bof=/dev/",
     r"\bzpool\s+destroy\b",
@@ -55,8 +57,13 @@ DENYLIST_PATTERNS = [
     r"\bchmod\s+-R\s+777\s+/\b",
 ]
 
-# Map command prefixes to permission categories
+# Map command prefixes to permission categories.
+# ORDER MATTERS: first match wins — read-only patterns must precede the
+# broad state-changing patterns they overlap with.
 CATEGORY_MAP: list[tuple[str, str]] = [
+    # read-only storage inspection must beat the broad storage pattern below
+    (r"^(pvesm\s+status|zpool\s+(status|list|iostat)|zfs\s+list)\b", "read_status"),
+    (r"^cat\s+/proc/", "read_status"),
     (r"^(qm|pct)\s+(start|stop|shutdown|reboot|reset|suspend|resume|clone|migrate|create|destroy|set|resize|snapshot|rollback)", "vmct_lifecycle"),
     (r"^(pvesm|zfs|zpool|lvcreate|lvremove|mkfs|mount|umount)\b", "storage"),
     (r"^(ip\s+link\s+set|ifup|ifdown|iptables|nft|pve-firewall)\b", "network_firewall"),

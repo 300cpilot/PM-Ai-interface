@@ -41,3 +41,12 @@ def read_tail(limit: int = 200) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
     return out
+
+
+def clear() -> None:
+    """Truncate the audit log. The 'audit_cleared' event is written by the caller
+    after this so the act of clearing is itself recorded."""
+    with _lock:
+        AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        AUDIT_LOG.write_text("")
+        os.chmod(AUDIT_LOG, 0o600)

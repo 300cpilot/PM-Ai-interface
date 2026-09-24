@@ -89,7 +89,7 @@ masked in all API responses.
 
 ## Install
 
-Full guide: **`docs/installation.md`** — problems: **`docs/troubleshooting.md`** — permission categories & allowlist: **`docs/permissions.md`**.
+Full guide: **`docs/installation.md`** — problems: **`docs/troubleshooting.md`** — permission categories & allowlist: **`docs/permissions.md`** — publishing to GitHub (sanitized): **`docs/publishing.md`**.
 
 On the PVE host, as root:
 
