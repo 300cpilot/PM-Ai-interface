@@ -86,11 +86,43 @@ curl https://<pve-host>:9443/health     # no -k needed after CA import
 ## Step 4 — PVE API token (enables live cluster context)
 
 The system prompt includes a live cluster snapshot (nodes, guests, storage,
-CT templates). It needs an API token:
+CT templates). The prompt itself can be viewed and overridden in
+AI → Settings → System Prompt (empty = built-in default; `{snapshot}` marks
+where the snapshot is injected). The snapshot needs an API token.
+
+**Recommended: dedicated `proxmox-ai@pve` user with a least-privilege role**
+(not a `root@pam` token). A root token can do anything on the cluster; a
+scoped role limits the blast radius if the token ever leaks, and is revocable
+without touching the `root@pam` account.
+
+```bash
+# 1. Create a role covering what the backend actually calls (node/guest/task
+#    read, guest lifecycle + agent exec, storage read/allocate). Sys.Modify +
+#    VM.Allocate at "/" are also what auth.py checks to recognize this as an
+#    admin-equivalent identity — do not drop those two.
+pveum role add PVEAIOperator -privs "Sys.Audit,Sys.Modify,VM.Audit,VM.Monitor,\
+VM.PowerMgmt,VM.Allocate,VM.Clone,VM.Migrate,VM.Snapshot,VM.Config.Disk,\
+VM.Config.CPU,VM.Config.Memory,VM.Config.Network,VM.Config.Options,\
+Datastore.Audit,Datastore.AllocateSpace"
+
+# 2. Create the user and grant the role at the root path (cluster-wide)
+pveum user add proxmox-ai@pve --comment "proxmox-ai backend"
+pveum acl modify / -user proxmox-ai@pve -role PVEAIOperator
+
+# 3. Issue a token from that user (not root@pam)
+pveum user token add proxmox-ai@pve backend --privsep 0
+# copy the printed token VALUE (shown once)
+```
+
+> This role list is a starting point, not a guarantee — if a specific
+> operation 403s, PVE's task log names the missing privilege; add it with
+> `pveum role modify PVEAIOperator -privs <existing-list>,<MissingPrivilege>`.
+
+**Quick-test fallback** (root token, faster but broader access — avoid outside
+a throwaway test cluster):
 
 ```bash
 pveum user token add root@pam proxmox-ai --privsep 0
-# copy the printed token VALUE (shown once)
 ```
 
 In the UI: AI → Settings → edit the config's `pve.api_token` — currently this

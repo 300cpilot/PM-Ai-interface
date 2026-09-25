@@ -88,3 +88,9 @@ def delete(sid: str, owner: str) -> bool:
     with _lock, _db() as conn:
         cur = conn.execute("DELETE FROM sessions WHERE id=? AND owner=?", (sid, owner))
         return cur.rowcount > 0
+
+
+def delete_all(owner: str) -> int:
+    with _lock, _db() as conn:
+        cur = conn.execute("DELETE FROM sessions WHERE owner=?", (owner,))
+        return cur.rowcount

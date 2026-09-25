@@ -32,6 +32,7 @@ ALLOWLIST_PATTERNS = [
     r"^zfs\s+list\b",
     r"^pveversion\b",
     r"^pvecm\s+status\b",
+    r"^pveam\s+(available|list)\b",
 ]
 
 # Catastrophic commands: ALWAYS require approval regardless of mode
@@ -64,6 +65,8 @@ CATEGORY_MAP: list[tuple[str, str]] = [
     # read-only storage inspection must beat the broad storage pattern below
     (r"^(pvesm\s+status|zpool\s+(status|list|iostat)|zfs\s+list)\b", "read_status"),
     (r"^cat\s+/proc/", "read_status"),
+    (r"^pveam\s+(available|list)\b", "read_status"),
+    (r"^pveam\s+(update|download)\b", "storage"),
     (r"^(qm|pct)\s+(start|stop|shutdown|reboot|reset|suspend|resume|clone|migrate|create|destroy|set|resize|snapshot|rollback)", "vmct_lifecycle"),
     (r"^(pvesm|zfs|zpool|lvcreate|lvremove|mkfs|mount|umount)\b", "storage"),
     (r"^(ip\s+link\s+set|ifup|ifdown|iptables|nft|pve-firewall)\b", "network_firewall"),

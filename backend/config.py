@@ -81,6 +81,10 @@ class Config(BaseModel):
     nodes: list[NodeConfig] = Field(default_factory=list)
     pve: PVEConfig = Field(default_factory=PVEConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    # Custom system prompt template from Settings → System Prompt.
+    # Empty = use the built-in default in context.SYSTEM_PROMPT.
+    # The literal placeholder {snapshot} is replaced with the live cluster snapshot.
+    system_prompt: str = ""
 
 
 _lock = threading.Lock()

@@ -204,7 +204,9 @@ if pct exec "$CTID" -- curl -sf "http://127.0.0.1:$BACKEND_PORT/health" >/dev/nu
     echo ""
     echo "NEXT STEPS (in the AI Settings tab, root@pam only):"
     echo "  1. vLLM provider (CT 100, $VLLM_MODEL) is pre-configured and active — chat works now"
-    echo "  2. Create a PVE API token: pveum user token add root@pam proxmox-ai --privsep 0"
+    echo "  2. PVE API token for live cluster context — recommended: a dedicated"
+    echo "     proxmox-ai@pve user with a least-privilege role, see docs/installation.md"
+    echo "     Step 4 (quick-test fallback: pveum user token add root@pam proxmox-ai --privsep 0)"
     echo "     then paste it into Settings (pve.api_token) to enable live cluster context"
     echo "  3. Enable toggles/categories as desired — all execution is OFF by default"
 else

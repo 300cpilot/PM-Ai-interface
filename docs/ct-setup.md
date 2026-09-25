@@ -54,12 +54,17 @@ pct create 130 local:vztmpl/<template> \
 
 ## PVE API token (backend → PVE)
 
+Recommended: a dedicated `proxmox-ai@pve` user with a least-privilege role —
+see `docs/installation.md` Step 4 for the full role/ACL setup. Quick-test
+fallback (broader access, avoid outside a throwaway cluster):
+
 ```bash
 pveum user token add root@pam proxmox-ai --privsep 0
 # paste the printed token value into Settings → pve.api_token
 ```
 
-Revoke with: `pveum user token remove root@pam proxmox-ai`
+Revoke with: `pveum user token remove root@pam proxmox-ai` (or
+`pveum user token remove proxmox-ai@pve backend` for the dedicated user).
 
 ## Adding cluster nodes
 

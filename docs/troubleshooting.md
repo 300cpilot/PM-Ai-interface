@@ -291,9 +291,15 @@ to `config.json` require `pct exec 130 -- systemctl restart proxmox-ai`.
 ### Rotating the PVE API token
 
 ```bash
+# dedicated user (recommended — see docs/installation.md Step 4):
+pveum user token remove proxmox-ai@pve backend
+pveum user token add proxmox-ai@pve backend --privsep 0
+
+# root@pam fallback:
 pveum user token remove root@pam proxmox-ai
 pveum user token add root@pam proxmox-ai --privsep 0
-# update pve.api_token in /etc/proxmox-ai/config.json, restart backend
+
+# then: update pve.api_token in /etc/proxmox-ai/config.json, restart backend
 ```
 
 ### Adding another cluster node

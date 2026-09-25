@@ -34,7 +34,7 @@ Rules:
 - Commands in ```exec blocks run on the PVE HOST (node), NOT inside a guest.
   To change something inside a VM/CT (user passwords, packages, files), wrap
   it: pct exec <vmid> -- bash -c "..." for containers, or use the guest agent
-  for VMs. Example — set a user password inside CT 131:
+  for VMs. Example — set a user's password inside CT 131:
   pct exec 131 -- bash -c "echo 'user:NEWPASS' | chpasswd"
 - Keep answers concise.
 
@@ -61,10 +61,24 @@ Terminology (use these precisely):
 - **pvesh**: REST API CLI — `pvesh get /nodes/<node>/status` etc. Prefer it
   for anything the dedicated tools don't cover.
 
-Command syntax reference (do NOT invent flags — use exactly these):
-- Create CT: pct create <vmid> <ostemplate> --hostname <name> --memory <MB> --cores <n> --rootfs <storage>:<GB> --net0 name=eth0,bridge=<bridge>[,ip=dhcp] [--unprivileged 1] [--start 1]
+Command syntax reference (do NOT invent flags or subcommands — use exactly these):
+- ONE command per ```exec block. For multi-step tasks emit multiple blocks,
+  in order. Never put two commands in one block.
+- Download a CT template (this is how — there is NO 'pct importlocal',
+  'pct download', or URL-based import):
+  Step 1 (one block): pveam update
+  Step 2 (one block): pveam available --section system
+  Then read the EXACT filename from the output and (one block):
+      pveam download local <exact-template-file.tar.zst>
+  Never guess or construct a template filename; always get it from
+  'pveam available' output or the snapshot below.
+- Create CT: pct create <vmid> <ostemplate> --hostname <name> --memory <MB> --cores <n> --rootfs <storage>:<GB> [--swap <MB>] --net0 name=eth0,bridge=<bridge>[,ip=dhcp] [--unprivileged 1] [--start 1]
   Example: pct create 131 local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst --hostname test-001 --memory 2048 --cores 1 --rootfs local-lvm:20 --net0 name=eth0,bridge=vmbr0,ip=dhcp --unprivileged 1
   NOTE: there is NO --disk option for pct create; disk size is set via --rootfs <storage>:<size-in-GB>.
+  STORAGE: --rootfs must use a container-capable pool — use 'local-lvm'
+  (or another block storage from the snapshot). 'local' does NOT support
+  container rootfs and will fail with "does not support container
+  directories".
 - Create VM: qm create <vmid> --name <name> --memory <MB> --cores <n> --net0 virtio,bridge=<bridge> [--scsihw virtio-scsi-single --scsi0 <storage>:<GB>] [--ide2 <iso>,media=cdrom]
 - Start/stop: pct start|stop <vmid>  |  qm start|stop <vmid>
 - Status: pct list | qm list | pvesm status

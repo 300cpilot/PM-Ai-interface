@@ -59,6 +59,21 @@ EXEC_BLOCK_RE = re.compile(r"```exec(?:\s+node=(\S+))?\s*\n(.*?)```", re.DOTALL)
 UPID_RE = re.compile(r"UPID:[^\s:]+:[0-9A-Fa-f]{8}:[0-9A-Fa-f]{8}:[^\s:]+")
 
 
+async def _stream_task_progress(node: str, output: str):
+    """If command output contains a UPID, poll it via tasks.watch() and
+    yield SSE-ready dicts. No-op if there's no node or no UPID (8.2/3.4)."""
+    if not node:
+        return
+    m = UPID_RE.search(output or "")
+    if not m:
+        return
+    try:
+        async for ev in tasks.watch(node, m.group(0)):
+            yield {"event": "task_progress", "data": json.dumps(ev)}
+    except Exception as e:
+        yield {"event": "task_progress", "data": json.dumps({"state": "error", "detail": str(e)})}
+
+
 # ---------- models ----------
 
 class ChatIn(BaseModel):
@@ -118,22 +133,27 @@ async def chat(body: ChatIn, user: User = Depends(require_user)):
 
         sessions.append(sid, "assistant", full)
 
-        # command proposals
+        # command proposals — one request per line, so multi-line blocks get
+        # per-command categorization/approval instead of being treated as a
+        # single shell blob categorized by its first line
         for m in EXEC_BLOCK_RE.finditer(full):
-            node, command = m.group(1) or "", m.group(2).strip()
-            req = ssh_exec.request(command, user.name, node)
-            payload = {"id": req.id, "command": command, "node": req.node,
-                       "category": req.category, "decision": req.decision,
-                       "reason": req.reason, "status": req.status}
-            if req.decision == "auto":
-                req = await ssh_exec.execute(req)
-                payload.update({"status": req.status, "output": req.output,
-                                "exit_code": req.exit_code})
-                yield {"event": "exec_result", "data": json.dumps(payload)}
-                async for ev in _stream_task_progress(req.node, req.output):
-                    yield ev
-            else:
-                yield {"event": "exec_request", "data": json.dumps(payload)}
+            node = m.group(1) or ""
+            commands = [ln.strip() for ln in m.group(2).strip().splitlines()
+                        if ln.strip() and not ln.strip().startswith("#")]
+            for command in commands:
+                req = ssh_exec.request(command, user.name, node)
+                payload = {"id": req.id, "command": command, "node": req.node,
+                           "category": req.category, "decision": req.decision,
+                           "reason": req.reason, "status": req.status}
+                if req.decision == "auto":
+                    req = await ssh_exec.execute(req)
+                    payload.update({"status": req.status, "output": req.output,
+                                    "exit_code": req.exit_code})
+                    yield {"event": "exec_result", "data": json.dumps(payload)}
+                    async for ev in _stream_task_progress(req.node, req.output):
+                        yield ev
+                else:
+                    yield {"event": "exec_request", "data": json.dumps(payload)}
         yield {"event": "done", "data": "{}"}
 
     return EventSourceResponse(stream())
@@ -147,6 +167,8 @@ async def get_config(user: User = Depends(require_user)):
     data = masked(cfg)
     data["kill_switch"] = kill_switch_active()
     data["categories"] = CATEGORIES
+    # built-in default so the Settings UI can show/edit/reset against it
+    data["default_system_prompt"] = context.SYSTEM_PROMPT
     return data
 
 
@@ -271,6 +293,13 @@ async def get_audit(limit: int = 200, user: User = Depends(require_user)):
     return {"entries": audit.read_tail(limit)}
 
 
+@app.delete("/audit")
+async def clear_audit(user: User = Depends(require_root_dep)):
+    audit.clear()
+    audit.log("audit_cleared", actor=user.name)
+    return {"ok": True}
+
+
 # ---------- sessions ----------
 
 @app.get("/sessions")
@@ -291,6 +320,13 @@ async def delete_session(sid: str, user: User = Depends(require_user)):
     if not sessions.delete(sid, user.name):
         raise HTTPException(404, "session not found")
     return {"ok": True}
+
+
+@app.delete("/sessions")
+async def clear_sessions(user: User = Depends(require_user)):
+    n = sessions.delete_all(user.name)
+    audit.log("sessions_cleared", actor=user.name, count=n)
+    return {"ok": True, "deleted": n}
 
 
 if __name__ == "__main__":

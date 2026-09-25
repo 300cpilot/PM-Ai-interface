@@ -72,10 +72,11 @@ def _username_from_cookie(cookie: str) -> str:
 
 
 def _has_admin_caps(caps: dict) -> bool:
-    # Sys.Modify + VM.Allocate on "/" is effectively admin
-    vms = caps.get("vms", {})
-    sys_ = caps.get("sys", {})
-    return bool(vms.get("VM.Allocate") and sys_.get("Sys.Modify"))
+    # /access/permissions is keyed by ACL path ("/", "/vms/100", ...), not by
+    # category — Sys.Modify + VM.Allocate at the root path "/" is effectively
+    # cluster-wide admin (what Administrator/PVEAdmin grants there).
+    root = caps.get("/", {})
+    return bool(root.get("Sys.Modify") and root.get("VM.Allocate"))
 
 
 def _extract_cookie(pve_auth_cookie: str | None, authorization: str | None) -> str:
