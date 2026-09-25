@@ -5,6 +5,8 @@ An AI assistant embedded in the Proxmox VE web UI. Chat with a local LLM
 any OpenAI-compatible endpoint) — and let it administrate your server or
 cluster, only as far as you allow.
 
+![proxmox-ai chat panel](ScreenShots/2026-09-24_15-08.png)
+
 ## Disclaimer
 
 This is an independent, community-developed project. It is **not affiliated
